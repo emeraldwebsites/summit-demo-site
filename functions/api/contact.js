@@ -1,13 +1,31 @@
-// Cloudflare Pages Function: POST /api/contact
-// Receives the quote form, emails the lead via Resend (free tier: 3,000 emails/month),
-// then redirects the visitor to /thank-you/.
+// Cloudflare Pages Function: /api/contact
+//   POST  receives the quote form, emails the lead via Resend, redirects to /thank-you/
+//   GET   health check: open /api/contact in a browser to see whether the function is
+//         deployed and which variables it can see (values are never shown).
 //
-// Setup (one time per client site, in the Cloudflare Pages dashboard → Settings → Environment variables):
-//   RESEND_API_KEY   = re_xxxxxxxx      (from resend.com, free account)
-//   LEAD_TO          = client@example.com   (where leads go; comma-separate for multiple)
-//   LEAD_FROM        = leads@yourdomain.com (must be a verified domain in Resend, or use onboarding@resend.dev for testing)
-//   LEAD_BCC         = you@emeraldwebsites.com   (optional: copy Emerald on every lead)
-//   TURNSTILE_SECRET = 0x...             (optional: only if turnstileSiteKey is set in site.config.mjs)
+// Setup (one time per client site, Cloudflare Pages → Settings → Variables and Secrets, Production):
+//   RESEND_API_KEY   = re_xxxxxxxx      (Secret) from resend.com
+//   LEAD_TO          = client@example.com   (Text) where leads go; comma-separate for multiple
+//   LEAD_FROM        = leads@yourdomain.com (Text) must be a domain verified in Resend,
+//                      or onboarding@resend.dev for testing (delivers only to the Resend account email)
+//   LEAD_BCC         = you@emeraldwebsites.com   (Text, optional) copy Emerald on every lead
+//   TURNSTILE_SECRET = 0x...             (Secret, optional) only if turnstileSiteKey is set in site.config.mjs
+// Variables take effect on the next deployment after they are added.
+
+const REQUIRED = ["RESEND_API_KEY", "LEAD_TO", "LEAD_FROM"];
+
+export async function onRequestGet({ env }) {
+  const status = {
+    function: "deployed",
+    variables: Object.fromEntries([...REQUIRED, "LEAD_BCC", "TURNSTILE_SECRET"].map((k) => [k, Boolean(env[k])])),
+    ready: REQUIRED.every((k) => Boolean(env[k])),
+    checkedAt: new Date().toISOString(),
+  };
+  return new Response(JSON.stringify(status, null, 2), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
 
 export async function onRequestPost({ request, env }) {
   const url = new URL(request.url);
@@ -15,10 +33,23 @@ export async function onRequestPost({ request, env }) {
   const get = (k) => (form.get(k) || "").toString().trim();
 
   // Honeypot: bots fill hidden fields, humans do not
-  if (get("_gotcha")) return redirect(url, "/thank-you/");
+  if (get("_gotcha")) {
+    console.log("contact: honeypot filled, dropping submission");
+    return redirect(url, "/thank-you/");
+  }
 
   const name = get("name"), phone = get("phone");
-  if (!name || !phone) return new Response("Name and phone are required.", { status: 400 });
+  if (!name || !phone) return page(400, "Name and phone are required. Please go back and try again.");
+
+  // Fail loudly if the function is not configured. A silent failure loses leads.
+  const missing = REQUIRED.filter((k) => !env[k]);
+  if (missing.length) {
+    console.error("contact: not configured, missing " + missing.join(", "));
+    return page(
+      500,
+      `This form is not fully set up yet (missing: ${missing.join(", ")}). Please call us directly, or if you are the site owner, add these variables in Cloudflare Pages → Settings → Variables and Secrets, then redeploy.`
+    );
+  }
 
   // Optional Turnstile verification
   if (env.TURNSTILE_SECRET) {
@@ -29,7 +60,7 @@ export async function onRequestPost({ request, env }) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token, remoteip: ip }),
     }).then((r) => r.json());
-    if (!check.success) return new Response("Spam check failed. Please go back and try again.", { status: 403 });
+    if (!check.success) return page(403, "Spam check failed. Please go back and try again.");
   }
 
   const fields = {
@@ -48,16 +79,11 @@ export async function onRequestPost({ request, env }) {
     .map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0"><b>${k}</b></td><td>${escapeHtml(v)}</td></tr>`)
     .join("")}</table><p><a href="tel:${phone.replace(/\D/g, "")}">Call ${escapeHtml(phone)}</a></p>`;
 
-  if (!env.RESEND_API_KEY || !env.LEAD_TO) {
-    console.log("Lead received but RESEND_API_KEY / LEAD_TO not configured:\n" + text);
-    return redirect(url, "/thank-you/");
-  }
-
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: env.LEAD_FROM || "onboarding@resend.dev",
+      from: env.LEAD_FROM,
       to: env.LEAD_TO.split(",").map((s) => s.trim()),
       bcc: env.LEAD_BCC ? env.LEAD_BCC.split(",").map((s) => s.trim()) : undefined,
       reply_to: fields.Email || undefined,
@@ -68,11 +94,22 @@ export async function onRequestPost({ request, env }) {
   });
 
   if (!res.ok) {
-    console.error("Resend error", res.status, await res.text());
-    return new Response("Sorry, something went wrong sending your request. Please call us directly.", { status: 502 });
+    const detail = await res.text();
+    console.error("contact: Resend error", res.status, detail);
+    return page(
+      502,
+      `Sorry, something went wrong sending your request. Please call us directly.<br><br><small style="color:#777">Resend responded ${res.status}: ${escapeHtml(detail)}</small>`
+    );
   }
+  const sent = await res.json().catch(() => ({}));
+  console.log("contact: sent via Resend, id " + (sent.id || "unknown"));
   return redirect(url, "/thank-you/");
 }
 
 const redirect = (url, path) => Response.redirect(new URL(path, url.origin).toString(), 303);
 const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const page = (status, message) =>
+  new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Quote form</title><style>body{font-family:system-ui,sans-serif;max-width:560px;margin:80px auto;padding:0 20px;line-height:1.6;color:#1c2429}a{color:#1f6f8b}</style></head><body><h1>${status >= 500 ? "Something went wrong" : "One more thing"}</h1><p>${message}</p><p><a href="javascript:history.back()">Go back</a></p></body></html>`,
+    { status, headers: { "Content-Type": "text/html; charset=utf-8" } }
+  );
