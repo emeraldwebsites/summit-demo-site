@@ -9,8 +9,12 @@
     });
   }
 
-  // Disable the submit button after click so double-taps do not send twice
+  // Stamp each form with the page-load time (spam trap: bots submit instantly)
+  // and disable the submit button after click so double-taps do not send twice
+  var loadedAt = String(Date.now());
   document.querySelectorAll("form.quote-form").forEach(function (form) {
+    var t = form.querySelector('input[name="_t"]');
+    if (t) t.value = loadedAt;
     form.addEventListener("submit", function () {
       var btn = form.querySelector('button[type="submit"]');
       if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }

@@ -264,7 +264,9 @@ export const quoteForm = (cfg, { compact = false } = {}) => {
 <form class="quote-form${compact ? " compact" : ""}" action="${action}" method="POST" data-provider="${esc(f.provider)}">
   <input type="hidden" name="_redirect" value="${esc(cfg.site.url)}/thank-you/">
   <input type="hidden" name="_subject" value="New quote request from ${esc(cfg.business.name)} website">
-  <input type="text" name="_gotcha" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+  <!-- Spam trap: a hidden checkbox (browser autofill never ticks boxes) plus a page-load timestamp -->
+  <label class="hp" aria-hidden="true"><input type="checkbox" name="_gotcha" value="1" tabindex="-1" autocomplete="off"> Leave this box unchecked</label>
+  <input type="hidden" name="_t" value="">
   <div class="form-row">
     <label>Name<input type="text" name="name" required autocomplete="name"></label>
     <label>Phone<input type="tel" name="phone" required autocomplete="tel"></label>

@@ -32,9 +32,15 @@ export async function onRequestPost({ request, env }) {
   const form = await request.formData();
   const get = (k) => (form.get(k) || "").toString().trim();
 
-  // Honeypot: bots fill hidden fields, humans do not
+  // Spam trap 1: hidden checkbox. Humans never see it; browser autofill never ticks it.
   if (get("_gotcha")) {
-    console.log("contact: honeypot filled, dropping submission");
+    console.log("contact: spam trap checkbox ticked, dropping submission");
+    return redirect(url, "/thank-you/");
+  }
+  // Spam trap 2: submitted less than 2 seconds after the page loaded (bots do, people cannot)
+  const loadedAt = Number(get("_t"));
+  if (loadedAt && Date.now() - loadedAt < 2000) {
+    console.log("contact: submitted too fast, dropping submission");
     return redirect(url, "/thank-you/");
   }
 
