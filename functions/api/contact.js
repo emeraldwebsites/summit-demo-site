@@ -89,9 +89,9 @@ export async function onRequestPost({ request, env }) {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: env.LEAD_FROM,
-      to: env.LEAD_TO.split(",").map((s) => s.trim()),
-      bcc: env.LEAD_BCC ? env.LEAD_BCC.split(",").map((s) => s.trim()) : undefined,
+      from: env.LEAD_FROM.trim().toLowerCase(),
+      to: addressList(env.LEAD_TO),
+      bcc: env.LEAD_BCC ? addressList(env.LEAD_BCC) : undefined,
       reply_to: fields.Email || undefined,
       subject: `New lead: ${name} — ${fields.Service || "Quote request"}`,
       text,
@@ -113,6 +113,8 @@ export async function onRequestPost({ request, env }) {
 }
 
 const redirect = (url, path) => Response.redirect(new URL(path, url.origin).toString(), 303);
+// Email providers compare addresses exactly, so normalize: trim spaces, lowercase, drop empties
+const addressList = (s) => String(s).split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
 const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const page = (status, message) =>
   new Response(
