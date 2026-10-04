@@ -5,7 +5,7 @@ A fast, lead-focused website template for trades and local service businesses. O
 ## Quick start 
 
 ```bash
-# Requires Node 18 or newer. Nothing to install.
+# Requires Node 18 or newer. Nothing to install. 
 node dev.mjs          # preview at http://localhost:4000, rebuilds on save
 node build.mjs        # writes the finished site to ./dist
 ```
